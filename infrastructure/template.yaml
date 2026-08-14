@@ -1,0 +1,175 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Auth0-protected chatbot — BFF Lambda + DynamoDB
+  NOTE: Lambda Function URL is intentionally OMITTED from this template.
+  The org hook AWS::EarlyValidation::PropertyValidation blocks Function URLs in CloudFormation.
+  Run scripts/post-deploy.sh after deploying this stack to attach the Function URL and create
+  the CloudFront distribution.
+
+Parameters:
+  Auth0Domain:
+    Type: String
+    Description: Auth0 tenant domain (e.g. my-tenant.us.auth0.com)
+  Auth0ClientId:
+    Type: String
+    Description: Auth0 application Client ID
+  Auth0ClientSecret:
+    Type: String
+    NoEcho: true
+    Description: Auth0 application Client Secret
+  SessionSecret:
+    Type: String
+    NoEcho: true
+    Description: Random 32+ char string for session encryption
+  AppHostname:
+    Type: String
+    Default: smitty.demo-connect.us
+  ApiHostname:
+    Type: String
+    Default: smitty-api.demo-connect.us
+  Auth0Connection:
+    Type: String
+    Default: DT
+    Description: >
+      Auth0 connection NAME (e.g. "DT"), NOT the connection ID (con_xxx).
+      The /authorize endpoint accepts names only — using a con_xxx ID causes
+      "the connection is not enabled" even when the connection is correctly
+      enabled in the dashboard. Leave blank for universal login.
+  BedrockModelId:
+    Type: String
+    Default: amazon.nova-micro-v1:0
+  Auth0CibaClientId:
+    Type: String
+    Description: Client ID for the DT CIBA M2M client
+    Default: ''
+  Auth0CibaClientSecret:
+    Type: String
+    NoEcho: true
+    Description: Client Secret for the DT CIBA M2M client
+    Default: ''
+  Auth0CibaAudience:
+    Type: String
+    Default: https://smitty.demo-connect.us/purchases
+    Description: Audience (DT Purchases API identifier)
+
+Globals:
+  Function:
+    Timeout: 120
+    MemorySize: 512
+    Runtime: nodejs20.x
+    Environment:
+      Variables:
+        AUTH0_DOMAIN: !Ref Auth0Domain
+        AUTH0_CLIENT_ID: !Ref Auth0ClientId
+        AUTH0_CLIENT_SECRET: !Ref Auth0ClientSecret
+        SESSION_SECRET: !Ref SessionSecret
+        APP_HOSTNAME: !Ref AppHostname
+        API_HOSTNAME: !Ref ApiHostname
+        AUTH0_CONNECTION: !Ref Auth0Connection
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        AUTH0_CIBA_CLIENT_ID: !Ref Auth0CibaClientId
+        AUTH0_CIBA_CLIENT_SECRET: !Ref Auth0CibaClientSecret
+        AUTH0_CIBA_AUDIENCE: !Ref Auth0CibaAudience
+        DYNAMODB_SESSIONS_TABLE: !Ref SessionsTable
+        DYNAMODB_CONVERSATIONS_TABLE: !Ref ConversationsTable
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
+
+Resources:
+
+  # ---- DynamoDB ----
+
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-sessions'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sessionId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: sid
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sessionId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: userId-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: sid-index
+          KeySchema:
+            - AttributeName: sid
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  ConversationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-conversations'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: conversationId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: conversationId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: userId-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # ---- Lambda ----
+  # IMPORTANT: No FunctionUrlConfig here — added post-deploy via scripts/post-deploy.sh
+  # Reason: org hook AWS::EarlyValidation::PropertyValidation blocks Function URLs in CFN
+
+  BackendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-backend'
+      CodeUri: ../backend/dist/
+      Handler: lambda.handler
+      Description: BFF for Auth0-protected chatbot
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConversationsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - arn:aws:lambda:us-east-1:204352680806:function:RetailLoyaltyPointsTracker
+                - arn:aws:lambda:us-east-1:204352680806:function:RetailPointsCoupon
+
+Outputs:
+  BackendFunctionArn:
+    Description: Lambda function ARN — pass to post-deploy.sh
+    Value: !GetAtt BackendFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BackendFunctionArn'
+
+  SessionsTableName:
+    Value: !Ref SessionsTable
+
+  ConversationsTableName:
+    Value: !Ref ConversationsTable

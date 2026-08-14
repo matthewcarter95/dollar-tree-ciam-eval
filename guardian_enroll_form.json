@@ -1,0 +1,45 @@
+{
+  "name": "Guardian Push MFA Opt-In",
+  "start": "step_mfa_prompt",
+  "nodes": [
+    {
+      "id": "step_mfa_prompt",
+      "type": "step",
+      "components": [
+        {
+          "id": "title_text",
+          "type": "rich_text",
+          "config": {
+            "content": "### Enhance Your Account Security\nWould you like to enable **Auth0 Guardian Push Notifications** for two-factor authentication?"
+          }
+        },
+        {
+          "id": "mfa_choice",
+          "type": "radio_group",
+          "config": {
+            "label": "Choose an option",
+            "required": true,
+            "defaultValue": "opt_in",
+            "options": [
+              {
+                "label": "Yes, enable Guardian Push MFA now",
+                "value": "opt_in"
+              },
+              {
+                "label": "No thanks, skip for now",
+                "value": "opt_out"
+              }
+            ]
+          }
+        },
+        {
+          "id": "submit_btn",
+          "type": "submit_button",
+          "config": {
+            "label": "Continue"
+          }
+        }
+      ]
+    }
+  ]
+}
