@@ -78,7 +78,7 @@ router.post('/anon/session', async (req, res) => {
     }
 
     const response = await fetch(
-      `https://${AUTH0_CANONICAL_DOMAIN}/anonymous/token`,
+      `https://${AUTH0_DOMAIN}/anonymous/token`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
