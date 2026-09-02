@@ -36,6 +36,10 @@ Parameters:
       The /authorize endpoint accepts names only — using a con_xxx ID causes
       "the connection is not enabled" even when the connection is correctly
       enabled in the dashboard. Leave blank for universal login.
+  Auth0CanonicalDomain:
+    Type: String
+    Default: myid-selfservice.cic-demo-platform.auth0app.com
+    Description: Canonical Auth0 tenant domain — used for Management API and MyAccount audience (never the custom domain)
   BedrockModelId:
     Type: String
     Default: amazon.nova-micro-v1:0
@@ -67,12 +71,14 @@ Globals:
         APP_HOSTNAME: !Ref AppHostname
         API_HOSTNAME: !Ref ApiHostname
         AUTH0_CONNECTION: !Ref Auth0Connection
+        AUTH0_CANONICAL_DOMAIN: !Ref Auth0CanonicalDomain
         BEDROCK_MODEL_ID: !Ref BedrockModelId
         AUTH0_CIBA_CLIENT_ID: !Ref Auth0CibaClientId
         AUTH0_CIBA_CLIENT_SECRET: !Ref Auth0CibaClientSecret
         AUTH0_CIBA_AUDIENCE: !Ref Auth0CibaAudience
         DYNAMODB_SESSIONS_TABLE: !Ref SessionsTable
         DYNAMODB_CONVERSATIONS_TABLE: !Ref ConversationsTable
+        DYNAMODB_CARTS_TABLE: !Ref CartsTable
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
 
 Resources:
@@ -132,6 +138,21 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  CartsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-carts'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
   # ---- Lambda ----
   # IMPORTANT: No FunctionUrlConfig here — added post-deploy via scripts/post-deploy.sh
   # Reason: org hook AWS::EarlyValidation::PropertyValidation blocks Function URLs in CFN
@@ -148,6 +169,8 @@ Resources:
             TableName: !Ref SessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ConversationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
         - Statement:
             - Effect: Allow
               Action:
@@ -173,3 +196,6 @@ Outputs:
 
   ConversationsTableName:
     Value: !Ref ConversationsTable
+
+  CartsTableName:
+    Value: !Ref CartsTable

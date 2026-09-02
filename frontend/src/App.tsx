@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import StorePage from './pages/StorePage';
 import ChatInterface from './components/ChatInterface';
 import ProfilePage from './pages/ProfilePage';
+import CartDrawer, { CartItem } from './components/CartDrawer';
+import { useAnonSession } from './hooks/useAnonSession';
 import { colors } from './theme';
 import { User } from './types';
 
@@ -13,14 +15,30 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('shop');
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [cartLoading, setCartLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const { accessToken: anonToken } = useAnonSession(API_BASE);
 
   useEffect(() => {
     checkAuth();
-    // Poll every 30s to detect backchannel logout session revocation
     pollRef.current = setInterval(checkAuth, 30_000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
+
+  // Load persisted cart from backend whenever we get an anon token
+  useEffect(() => {
+    if (!anonToken) return;
+    fetch(`${API_BASE}/api/cart`, {
+      headers: { Authorization: `Bearer ${anonToken}` },
+      credentials: 'include',
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.items) setCartItems(data.items); })
+      .catch(() => {});
+  }, [anonToken]);
 
   async function checkAuth() {
     try {
@@ -28,16 +46,93 @@ export default function App() {
       if (res.ok) {
         setUser(await res.json() as User);
       } else {
-        if (user !== null) {
-          // Session was revoked externally — redirect to login
-          window.location.href = `${API_BASE}/auth/login`;
-        }
+        if (user !== null) window.location.href = `${API_BASE}/auth/login`;
         setUser(null);
       }
     } catch {
       setUser(null);
     } finally {
       setAuthChecked(true);
+    }
+  }
+
+  async function handleAddToCart(item: Omit<CartItem, 'qty'>) {
+    if (cartLoading) return;
+    setCartLoading(true);
+
+    // Optimistic update
+    setCartItems(prev => {
+      const idx = prev.findIndex(i => i.name === item.name);
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], qty: updated[idx].qty + 1 };
+        return updated;
+      }
+      return [...prev, { ...item, qty: 1 }];
+    });
+
+    if (anonToken) {
+      try {
+        const res = await fetch(`${API_BASE}/api/cart`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${anonToken}`,
+          },
+          credentials: 'include',
+          body: JSON.stringify(item),
+        });
+        if (res.ok) {
+          const data = await res.json() as { items: CartItem[] };
+          setCartItems(data.items);
+        }
+      } catch (err) {
+        console.warn('[cart] add failed:', err);
+      }
+    }
+
+    setCartLoading(false);
+    setCartOpen(true);
+  }
+
+  async function handleRemoveFromCart(name: string) {
+    // Optimistic update
+    setCartItems(prev => {
+      const idx = prev.findIndex(i => i.name === name);
+      if (idx < 0) return prev;
+      if (prev[idx].qty > 1) {
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], qty: updated[idx].qty - 1 };
+        return updated;
+      }
+      return prev.filter(i => i.name !== name);
+    });
+
+    if (anonToken) {
+      try {
+        await fetch(`${API_BASE}/api/cart/${encodeURIComponent(name)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${anonToken}` },
+          credentials: 'include',
+        });
+      } catch (err) {
+        console.warn('[cart] remove failed:', err);
+      }
+    }
+  }
+
+  async function handleClearCart() {
+    setCartItems([]);
+    if (anonToken) {
+      try {
+        await fetch(`${API_BASE}/api/cart`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${anonToken}` },
+          credentials: 'include',
+        });
+      } catch (err) {
+        console.warn('[cart] clear failed:', err);
+      }
     }
   }
 
@@ -49,9 +144,10 @@ export default function App() {
     }
   }
 
+  const cartCount = cartItems.reduce((s, i) => s + i.qty, 0);
+
   return (
     <div style={styles.root}>
-      {/* Header */}
       <header style={styles.header}>
         <div style={styles.headerInner}>
           <div style={styles.logo}>
@@ -81,6 +177,14 @@ export default function App() {
             )}
           </nav>
           <div style={styles.headerRight}>
+            {/* Cart button — visible to all users (anonymous + authenticated) */}
+            <button style={styles.cartBtn} onClick={() => setCartOpen(true)}>
+              🛒
+              {cartCount > 0 && (
+                <span style={styles.cartBadge}>{cartCount}</span>
+              )}
+            </button>
+
             {authChecked && (
               user ? (
                 <div style={styles.userArea}>
@@ -90,16 +194,20 @@ export default function App() {
                   <a href={`${API_BASE}/auth/logout`} style={styles.signOutLink}>Sign out</a>
                 </div>
               ) : (
-                <a href={`${API_BASE}/auth/login`} style={styles.signInBtn}>Sign In</a>
+                <div style={styles.authButtons}>
+                  <a href={`${API_BASE}/auth/login`} style={styles.signInBtn}>Sign In</a>
+                  <a href={`${API_BASE}/auth/signup`} style={styles.signUpBtn}>Sign Up</a>
+                </div>
               )
             )}
           </div>
         </div>
       </header>
 
-      {/* Content */}
       <main style={styles.main}>
-        {activeTab === 'shop' && <StorePage />}
+        {activeTab === 'shop' && (
+          <StorePage onAddToCart={handleAddToCart} />
+        )}
         {activeTab === 'chat' && user && (
           <ChatInterface user={user} apiBase={API_BASE} />
         )}
@@ -107,6 +215,14 @@ export default function App() {
           <ProfilePage user={user} apiBase={API_BASE} />
         )}
       </main>
+
+      <CartDrawer
+        items={cartItems}
+        open={cartOpen}
+        onClose={() => setCartOpen(false)}
+        onRemove={handleRemoveFromCart}
+        onClear={handleClearCart}
+      />
     </div>
   );
 }
@@ -175,9 +291,34 @@ const styles: Record<string, React.CSSProperties> = {
     color: colors.white,
   },
   headerRight: {
-    minWidth: 100,
     display: 'flex',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 10,
+  },
+  cartBtn: {
+    position: 'relative',
+    background: 'rgba(255,255,255,0.15)',
+    border: 'none',
+    borderRadius: 8,
+    padding: '0.35rem 0.7rem',
+    fontSize: '1.1rem',
+    cursor: 'pointer',
+    lineHeight: 1,
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    background: colors.yellow.primary,
+    color: colors.green.dark,
+    fontSize: '0.65rem',
+    fontWeight: 900,
+    borderRadius: '50%',
+    width: 18,
+    height: 18,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   userArea: {
     display: 'flex',
@@ -196,7 +337,22 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.82rem',
     textDecoration: 'none',
   },
+  authButtons: {
+    display: 'flex',
+    gap: 8,
+    alignItems: 'center',
+  },
   signInBtn: {
+    background: 'transparent',
+    color: colors.white,
+    padding: '0.4rem 1rem',
+    borderRadius: 6,
+    fontSize: '0.85rem',
+    fontWeight: 600,
+    textDecoration: 'none',
+    border: `1px solid rgba(255,255,255,0.6)`,
+  },
+  signUpBtn: {
     background: colors.yellow.primary,
     color: colors.green.dark,
     padding: '0.4rem 1rem',

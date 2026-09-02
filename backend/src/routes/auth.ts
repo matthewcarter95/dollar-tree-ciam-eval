@@ -17,6 +17,15 @@ router.get('/login', (_req, res) => {
   (res as any).oidc.login({ returnTo: `https://${APP_HOSTNAME}` });
 });
 
+// Signup route — opens Universal Login directly on the signup screen.
+router.get('/signup', (_req, res) => {
+  const APP_HOSTNAME = process.env.APP_HOSTNAME || 'smitty.demo-connect.us';
+  (res as any).oidc.login({
+    returnTo: `https://${APP_HOSTNAME}`,
+    authorizationParams: { screen_hint: 'signup' },
+  });
+});
+
 /**
  * OIDC Backchannel Logout endpoint.
  *

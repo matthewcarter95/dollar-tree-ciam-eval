@@ -13,6 +13,34 @@ import {
 
 const router = Router();
 
+// Store catalog — mirrors the static data in StorePage.tsx.
+// pointsCost = price in cents (100 pts per $1.00, 125 pts per $1.25).
+const STORE_CATALOG = [
+  { name: 'Balloon Pack (12ct)',   price: '$1.00', pointsCost: 100 },
+  { name: 'Hand Sanitizer 8oz',   price: '$1.25', pointsCost: 125 },
+  { name: 'Chocolate Mix Bag',    price: '$1.25', pointsCost: 125 },
+  { name: 'Spiral Notebook',      price: '$1.00', pointsCost: 100 },
+  { name: 'Taper Candles (4ct)',  price: '$1.25', pointsCost: 125 },
+  { name: 'Mesh Storage Basket',  price: '$1.25', pointsCost: 125 },
+  // Category minimums
+  { name: 'Candy & Snacks',       price: '$1.25', pointsCost: 125 },
+  { name: 'Cleaning Supplies',    price: '$1.25', pointsCost: 125 },
+  { name: 'Party Supplies',       price: '$1.00', pointsCost: 100 },
+  { name: 'School & Office',      price: '$1.00', pointsCost: 100 },
+  { name: 'Seasonal & Holiday',   price: '$1.25', pointsCost: 125 },
+  { name: 'Kitchen & Dining',     price: '$1.25', pointsCost: 125 },
+  { name: 'Health & Beauty',      price: '$1.25', pointsCost: 125 },
+  { name: 'Pet Supplies',         price: '$1.00', pointsCost: 100 },
+];
+
+function findCatalogItem(query: string) {
+  const q = query.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  return STORE_CATALOG.find(item => {
+    const n = item.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    return n.includes(q) || q.includes(n) || q.split(' ').every(w => n.includes(w));
+  }) ?? null;
+}
+
 // List conversations for the authenticated user
 router.get('/conversations', requireAuth, async (req, res) => {
   try {
@@ -55,8 +83,26 @@ function buildTools(loyaltyId?: string | number): Tool[] {
     },
     {
       toolSpec: {
+        name: 'lookup_item_price',
+        description: 'Look up the exact price and point cost for a store item from the DT catalog. ALWAYS call this before purchase_with_points to get the correct pointsCost. Returns the matching item with its price and points, or lists all available items if no match is found.',
+        inputSchema: {
+          json: {
+            type: 'object',
+            properties: {
+              itemName: {
+                type: 'string',
+                description: 'The item name the customer mentioned (e.g. "spiral notebook", "chocolate")',
+              },
+            },
+            required: ['itemName'],
+          },
+        },
+      },
+    },
+    {
+      toolSpec: {
         name: 'purchase_with_points',
-        description: 'Purchase a store item using loyalty points. Sends a Guardian push notification to the user\'s phone for approval and waits for them to approve (up to 90 seconds). Call this when the user says they want to buy, purchase, or spend points on an item. $1.00 items cost 100 points; $1.25 items cost 125 points.',
+        description: 'Purchase a store item using loyalty points. Sends a Guardian push notification to the user\'s phone for approval and waits for them to approve (up to 90 seconds). Always call lookup_item_price first to get the correct pointsCost from the catalog.',
         inputSchema: {
           json: {
             type: 'object',
@@ -130,6 +176,19 @@ router.post('/chat', requireAuth, async (req, res) => {
         });
       }
 
+      if (toolName === 'lookup_item_price') {
+        const { itemName } = _input as { itemName?: string };
+        const match = findCatalogItem(itemName ?? '');
+        if (match) {
+          return JSON.stringify({ found: true, name: match.name, price: match.price, pointsCost: match.pointsCost });
+        }
+        return JSON.stringify({
+          found: false,
+          message: `"${itemName}" was not found in the catalog.`,
+          availableItems: STORE_CATALOG.map(i => ({ name: i.name, price: i.price, pointsCost: i.pointsCost })),
+        });
+      }
+
       if (toolName === 'redeem_coupon') {
         const code = ((_input as { couponCode?: string }).couponCode ?? '').trim().toUpperCase();
         if (!code) return JSON.stringify({ success: false, message: 'No coupon code provided.' });
@@ -176,7 +235,7 @@ router.post('/chat', requireAuth, async (req, res) => {
 
     const tools = buildTools(loyaltyId);
     const systemPrompt = loyaltyId
-      ? 'You are DT (Dollar Treasure) AI Assistant. When the user wants to redeem a coupon or promo code, you MUST call the redeem_coupon tool. When the user asks about their points or balance, you MUST call get_loyalty_points. When the user wants to buy or purchase a store item using their points, you MUST call purchase_with_points with the item name and cost ($1.00 items = 100 points, $1.25 items = 125 points). When purchase_with_points returns status=ciba_pending, tell the user a Guardian push notification has been sent to their phone and they should approve it there to complete the purchase. Do not say you are waiting — the approval UI is shown separately. Always use these tools for loyalty operations.'
+      ? 'You are DT (Dollar Treasure) AI Assistant. Rules: (1) Coupon/promo redemption → call redeem_coupon. (2) Points/balance inquiry → call get_loyalty_points. (3) Buying an item with points → FIRST call lookup_item_price to get the exact pointsCost from the catalog, THEN call purchase_with_points with that exact value — never guess the price. (4) When purchase_with_points returns status=ciba_pending, tell the user a Guardian push has been sent to their phone for approval; the approval UI appears separately. Always use these tools for loyalty operations.'
       : undefined;
     const replyText = await generateReplyWithTools(updatedMessages, tools, toolHandler, systemPrompt);
 

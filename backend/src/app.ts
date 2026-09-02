@@ -11,6 +11,7 @@ import userRoutes from './routes/user';
 import profileRoutes from './routes/profile';
 import loyaltyRoutes from './routes/loyalty';
 import purchaseRoutes from './routes/purchase';
+import anonRoutes from './routes/anon';
 
 const app = express();
 
@@ -109,6 +110,7 @@ app.use('/api', profileRoutes);
 app.use('/api', loyaltyRoutes);
 app.use('/api', purchaseRoutes);
 app.use('/api', chatRoutes);
+app.use('/api', anonRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 

@@ -1,3 +1,4 @@
+import { CartItem } from '../components/CartDrawer';
 import { colors } from '../theme';
 
 const CATEGORIES = [
@@ -11,16 +12,20 @@ const CATEGORIES = [
   { emoji: '🐾', name: 'Pet Supplies', price: '$1.00', count: '90+ items' },
 ];
 
-const FEATURED = [
-  { emoji: '🎈', name: 'Balloon Pack (12ct)', price: '$1.00' },
-  { emoji: '🧴', name: 'Hand Sanitizer 8oz', price: '$1.25' },
-  { emoji: '🍫', name: 'Chocolate Mix Bag', price: '$1.25' },
-  { emoji: '📓', name: 'Spiral Notebook', price: '$1.00' },
-  { emoji: '🕯️', name: 'Taper Candles (4ct)', price: '$1.25' },
-  { emoji: '🧺', name: 'Mesh Storage Basket', price: '$1.25' },
+const FEATURED: Omit<CartItem, 'qty'>[] = [
+  { emoji: '🎈', name: 'Balloon Pack (12ct)', price: '$1.00', pointsCost: 100 },
+  { emoji: '🧴', name: 'Hand Sanitizer 8oz', price: '$1.25', pointsCost: 125 },
+  { emoji: '🍫', name: 'Chocolate Mix Bag', price: '$1.25', pointsCost: 125 },
+  { emoji: '📓', name: 'Spiral Notebook', price: '$1.00', pointsCost: 100 },
+  { emoji: '🕯️', name: 'Taper Candles (4ct)', price: '$1.25', pointsCost: 125 },
+  { emoji: '🧺', name: 'Mesh Storage Basket', price: '$1.25', pointsCost: 125 },
 ];
 
-export default function StorePage() {
+interface StorePageProps {
+  onAddToCart: (item: Omit<CartItem, 'qty'>) => void;
+}
+
+export default function StorePage({ onAddToCart }: StorePageProps) {
   return (
     <div style={{ background: colors.gray[100], minHeight: '100%' }}>
       {/* Hero */}
@@ -39,7 +44,12 @@ export default function StorePage() {
               <div style={styles.featuredEmoji}>{item.emoji}</div>
               <p style={styles.featuredName}>{item.name}</p>
               <p style={styles.featuredPrice}>{item.price}</p>
-              <button style={styles.addButton}>Add to Cart</button>
+              <button
+                style={styles.addButton}
+                onClick={() => onAddToCart(item)}
+              >
+                Add to Cart
+              </button>
             </div>
           ))}
         </div>

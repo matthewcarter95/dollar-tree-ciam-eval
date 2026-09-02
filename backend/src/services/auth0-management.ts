@@ -16,7 +16,7 @@ async function getM2MToken(): Promise<string> {
     return cachedToken.value;
   }
   const res = await fetch(
-    `https://${process.env.AUTH0_DOMAIN}/oauth/token`,
+    `https://${process.env.AUTH0_CANONICAL_DOMAIN}/oauth/token`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -24,7 +24,7 @@ async function getM2MToken(): Promise<string> {
         grant_type: 'client_credentials',
         client_id: process.env.AUTH0_CLIENT_ID,
         client_secret: process.env.AUTH0_CLIENT_SECRET,
-        audience: `https://${process.env.AUTH0_DOMAIN}/api/v2/`,
+        audience: `https://${process.env.AUTH0_CANONICAL_DOMAIN}/api/v2/`,
       }),
     }
   );
@@ -35,7 +35,7 @@ async function getM2MToken(): Promise<string> {
 }
 
 function mgmtUrl(path: string) {
-  return `https://${process.env.AUTH0_DOMAIN}/api/v2${path}`;
+  return `https://${process.env.AUTH0_CANONICAL_DOMAIN}/api/v2${path}`;
 }
 
 async function mgmtFetch(method: string, path: string, body?: object) {
