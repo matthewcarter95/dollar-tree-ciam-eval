@@ -9,20 +9,44 @@ import { revokeSessionsBySid, revokeSessionsByUserId } from '../services/dynamod
 
 const router = Router();
 
-// Custom login route — forces returnTo to the frontend app after Auth0 redirect.
-// In express-openid-connect v2, login() and logout() are on res.oidc (write side),
-// while user/token accessors are on req.oidc (read side).
-router.get('/login', (_req, res) => {
+function setAnonSessionCookie(res: any, sessionToken: string) {
+  // SameSite=Lax is sent on top-level GET navigations (cross-site redirects),
+  // which is exactly what the login redirect to Auth0's /authorize endpoint is.
+  res.cookie('auth0_anon', sessionToken, {
+    secure: true,
+    sameSite: 'lax',
+    domain: '.demo-connect.us',
+    maxAge: 5 * 60 * 1000,
+  });
+}
+
+router.get('/login', (req, res) => {
   const APP_HOSTNAME = process.env.APP_HOSTNAME || 'smitty.demo-connect.us';
-  (res as any).oidc.login({ returnTo: `https://${APP_HOSTNAME}` });
+  const { session_token } = req.query as { session_token?: string };
+  if (session_token) {
+    setAnonSessionCookie(res, session_token);
+  }
+  (res as any).oidc.login({
+    returnTo: `https://${APP_HOSTNAME}`,
+    // Pass as /authorize URL parameter too — belt-and-suspenders in case
+    // the cookie is dropped during the redirect.
+    ...(session_token ? { authorizationParams: { anonymous_session_token: session_token } } : {}),
+  });
 });
 
 // Signup route — opens Universal Login directly on the signup screen.
-router.get('/signup', (_req, res) => {
+router.get('/signup', (req, res) => {
   const APP_HOSTNAME = process.env.APP_HOSTNAME || 'smitty.demo-connect.us';
+  const { session_token } = req.query as { session_token?: string };
+  if (session_token) {
+    setAnonSessionCookie(res, session_token);
+  }
   (res as any).oidc.login({
     returnTo: `https://${APP_HOSTNAME}`,
-    authorizationParams: { screen_hint: 'signup' },
+    authorizationParams: {
+      screen_hint: 'signup',
+      ...(session_token ? { anonymous_session_token: session_token } : {}),
+    },
   });
 });
 

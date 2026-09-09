@@ -3,7 +3,7 @@ import StorePage from './pages/StorePage';
 import ChatInterface from './components/ChatInterface';
 import ProfilePage from './pages/ProfilePage';
 import CartDrawer, { CartItem } from './components/CartDrawer';
-import { useAnonSession } from './hooks/useAnonSession';
+import { useAnonSession, ANON_SUB_KEY } from './hooks/useAnonSession';
 import { colors } from './theme';
 import { User } from './types';
 
@@ -28,17 +28,46 @@ export default function App() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
-  // Load persisted cart from backend whenever we get an anon token
+  // Load cart whenever auth state or anon token becomes available.
+  // Authenticated users: rely on OIDC session cookie (no Bearer token needed) —
+  // the backend resolves their sub from the session, returning the merged cart.
+  // Anonymous users: use the anon Bearer token.
+  // Also clear the stored anonymous session_token when the user has logged in so
+  // their next anonymous browsing gets a fresh identity.
   useEffect(() => {
-    if (!anonToken) return;
-    fetch(`${API_BASE}/api/cart`, {
-      headers: { Authorization: `Bearer ${anonToken}` },
-      credentials: 'include',
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.items) setCartItems(data.items); })
-      .catch(() => {});
-  }, [anonToken]);
+    if (!authChecked) return;
+
+    if (user) {
+      // If an anonymous cart was built before login, merge it now.
+      // This is the client-side fallback for when the Auth0 Post-Login Action
+      // cannot populate event.anonymous_session (e.g. cookie not forwarded).
+      const anonSub = localStorage.getItem(ANON_SUB_KEY);
+      if (anonSub) {
+        fetch(`${API_BASE}/api/cart/merge`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ anonSub }),
+        }).catch(() => {});
+        localStorage.removeItem(ANON_SUB_KEY);
+      }
+
+      // Clear any stale anonymous session from localStorage
+      localStorage.removeItem('dt_anon_session_token');
+      fetch(`${API_BASE}/api/cart`, { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data?.items) setCartItems(data.items); })
+        .catch(() => {});
+    } else if (anonToken) {
+      fetch(`${API_BASE}/api/cart`, {
+        headers: { Authorization: `Bearer ${anonToken}` },
+        credentials: 'include',
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data?.items) setCartItems(data.items); })
+        .catch(() => {});
+    }
+  }, [user, authChecked, anonToken]);
 
   async function checkAuth() {
     try {
@@ -71,14 +100,13 @@ export default function App() {
       return [...prev, { ...item, qty: 1 }];
     });
 
-    if (anonToken) {
+    if (user || anonToken) {
       try {
+        const headers: HeadersInit = { 'Content-Type': 'application/json' };
+        if (!user && anonToken) headers['Authorization'] = `Bearer ${anonToken}`;
         const res = await fetch(`${API_BASE}/api/cart`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${anonToken}`,
-          },
+          headers,
           credentials: 'include',
           body: JSON.stringify(item),
         });
@@ -108,11 +136,13 @@ export default function App() {
       return prev.filter(i => i.name !== name);
     });
 
-    if (anonToken) {
+    if (user || anonToken) {
       try {
+        const headers: HeadersInit = {};
+        if (!user && anonToken) headers['Authorization'] = `Bearer ${anonToken}`;
         await fetch(`${API_BASE}/api/cart/${encodeURIComponent(name)}`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${anonToken}` },
+          headers,
           credentials: 'include',
         });
       } catch (err) {
@@ -123,11 +153,13 @@ export default function App() {
 
   async function handleClearCart() {
     setCartItems([]);
-    if (anonToken) {
+    if (user || anonToken) {
       try {
+        const headers: HeadersInit = {};
+        if (!user && anonToken) headers['Authorization'] = `Bearer ${anonToken}`;
         await fetch(`${API_BASE}/api/cart`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${anonToken}` },
+          headers,
           credentials: 'include',
         });
       } catch (err) {
@@ -136,9 +168,15 @@ export default function App() {
     }
   }
 
+  function loginUrl(path: '/auth/login' | '/auth/signup') {
+    const sessionToken = localStorage.getItem('dt_anon_session_token');
+    const url = `${API_BASE}${path}`;
+    return sessionToken ? `${url}?session_token=${encodeURIComponent(sessionToken)}` : url;
+  }
+
   function handleChatTabClick() {
     if (!user) {
-      window.location.href = `${API_BASE}/auth/login`;
+      window.location.href = loginUrl('/auth/login');
     } else {
       setActiveTab('chat');
     }
@@ -195,8 +233,8 @@ export default function App() {
                 </div>
               ) : (
                 <div style={styles.authButtons}>
-                  <a href={`${API_BASE}/auth/login`} style={styles.signInBtn}>Sign In</a>
-                  <a href={`${API_BASE}/auth/signup`} style={styles.signUpBtn}>Sign Up</a>
+                  <a href={loginUrl('/auth/login')} style={styles.signInBtn}>Sign In</a>
+                  <a href={loginUrl('/auth/signup')} style={styles.signUpBtn}>Sign Up</a>
                 </div>
               )
             )}

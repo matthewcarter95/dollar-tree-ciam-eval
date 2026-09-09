@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 const SESSION_TOKEN_KEY = 'dt_anon_session_token';
-const ACCESS_TOKEN_KEY = 'dt_anon_access_token';
-const EXPIRES_AT_KEY = 'dt_anon_expires_at';
+export const ANON_SUB_KEY = 'dt_anon_sub';
 
 export interface AnonSession {
   accessToken: string | null;
@@ -55,6 +54,13 @@ export function useAnonSession(apiBase: string): AnonSession {
       if (data.session_token) {
         localStorage.setItem(SESSION_TOKEN_KEY, data.session_token);
       }
+
+      // Decode sub from the access token and persist it so the login flow
+      // can pass it to the merge endpoint even without Auth0 anonymous_session.
+      try {
+        const payload = JSON.parse(atob(data.access_token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+        if (payload.sub) localStorage.setItem(ANON_SUB_KEY, payload.sub);
+      } catch { /* non-blocking */ }
 
       // Schedule refresh 60s before expiry (default 7200s for web tokens)
       const expiresIn = data.expires_in ?? 7200;

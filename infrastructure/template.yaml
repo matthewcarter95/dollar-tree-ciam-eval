@@ -56,6 +56,10 @@ Parameters:
     Type: String
     Default: https://smitty.demo-connect.us/purchases
     Description: Audience (DT Purchases API identifier)
+  CartMergeSecret:
+    Type: String
+    NoEcho: true
+    Description: Shared secret used by the Auth0 Post-Login Action to call /api/cart/merge
 
 Globals:
   Function:
@@ -79,6 +83,7 @@ Globals:
         DYNAMODB_SESSIONS_TABLE: !Ref SessionsTable
         DYNAMODB_CONVERSATIONS_TABLE: !Ref ConversationsTable
         DYNAMODB_CARTS_TABLE: !Ref CartsTable
+        CART_MERGE_SECRET: !Ref CartMergeSecret
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
 
 Resources:

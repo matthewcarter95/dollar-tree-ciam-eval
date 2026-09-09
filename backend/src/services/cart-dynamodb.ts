@@ -83,6 +83,21 @@ export async function removeCartItem(userId: string, name: string): Promise<Cart
   return cart;
 }
 
+export async function upsertCartBulk(userId: string, items: CartItem[]): Promise<Cart> {
+  const now = new Date().toISOString();
+  const cart: Cart = { userId, items, updatedAt: now };
+  await client.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: {
+        ...cart,
+        ttl: Math.floor(Date.now() / 1000) + TTL_SECONDS,
+      },
+    })
+  );
+  return cart;
+}
+
 export async function clearCart(userId: string): Promise<void> {
   await client.send(new DeleteCommand({ TableName: TABLE, Key: { userId } }));
 }
