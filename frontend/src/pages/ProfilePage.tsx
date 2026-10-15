@@ -463,7 +463,7 @@ function PaymentMethods({ apiBase }: { apiBase: string }) {
 
   return (
     <div>
-      <SectionHeader title="Payment Methods" subtitle="Demo only: use a test number such as 4242 4242 4242 4242. Only the brand and last 4 digits are stored." />
+      <SectionHeader title="Payment Methods" subtitle="Demo only: use test card numbers, never a real card. The number is stored (not the CVV) so it can be replayed to UCP." />
       {loading && <p style={styles.loading}>Loading…</p>}
       <div style={styles.addrList}>
         {methods.map((m) => (
