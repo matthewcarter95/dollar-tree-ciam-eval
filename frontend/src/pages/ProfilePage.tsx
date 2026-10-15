@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { colors } from '../theme';
-import { User, UserProfile, Address, MfaFactor, LoyaltyData } from '../types';
+import { User, UserProfile, Address, PaymentMethod, MfaFactor, LoyaltyData } from '../types';
 
 interface Props {
   user: User;
   apiBase: string;
 }
 
-type Section = 'personal' | 'loyalty' | 'security' | 'addresses';
+type Section = 'personal' | 'loyalty' | 'security' | 'addresses' | 'payments';
 
 export default function ProfilePage({ user, apiBase }: Props) {
   const [activeSection, setActiveSection] = useState<Section>('personal');
@@ -23,7 +23,7 @@ export default function ProfilePage({ user, apiBase }: Props) {
           <p style={styles.userName}>{user.name}</p>
           <p style={styles.userEmail}>{user.email}</p>
         </div>
-        {(['personal', 'loyalty', 'security', 'addresses'] as Section[]).map((s) => (
+        {(['personal', 'loyalty', 'security', 'addresses', 'payments'] as Section[]).map((s) => (
           <button
             key={s}
             style={{ ...styles.navBtn, ...(activeSection === s ? styles.navBtnActive : {}) }}
@@ -40,13 +40,14 @@ export default function ProfilePage({ user, apiBase }: Props) {
         {activeSection === 'loyalty'  && <LoyaltySection  user={user} apiBase={apiBase} />}
         {activeSection === 'security' && <SecuritySection user={user} apiBase={apiBase} />}
         {activeSection === 'addresses' && <AddressBook    user={user} apiBase={apiBase} />}
+        {activeSection === 'payments' && <PaymentMethods apiBase={apiBase} />}
       </main>
     </div>
   );
 }
 
 function sectionLabel(s: Section) {
-  return { personal: '👤 Personal Details', loyalty: '🏅 Loyalty Program', security: '🔐 Security', addresses: '📦 Address Book' }[s];
+  return { personal: '👤 Personal Details', loyalty: '🏅 Loyalty Program', security: '🔐 Security', addresses: '📦 Address Book', payments: '💳 Payment Methods' }[s];
 }
 
 // ─── Personal Details ──────────────────────────────────────────────────────────
@@ -390,13 +391,111 @@ function AddressBook({ apiBase }: { user: User; apiBase: string }) {
             <Field label="Label (e.g. Home)" value={form.label} onChange={(v) => setForm((p) => ({ ...p, label: v }))} placeholder="Home" />
             <Field label="Street *" value={form.street} onChange={(v) => setForm((p) => ({ ...p, street: v }))} placeholder="123 Main St" />
             <Field label="City *" value={form.city} onChange={(v) => setForm((p) => ({ ...p, city: v }))} />
-            <Field label="State *" value={form.state} onChange={(v) => setForm((p) => ({ ...p, state: v }))} placeholder="OR" />
+            <Field label="State *" value={form.state} onChange={(v) => setForm((p) => ({ ...p, state: v.toUpperCase() }))} placeholder="OR" maxLength={2} />
             <Field label="ZIP *" value={form.zip} onChange={(v) => setForm((p) => ({ ...p, zip: v }))} />
             <Field label="Country *" value={form.country} onChange={(v) => setForm((p) => ({ ...p, country: v }))} />
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             <button style={styles.saveBtn} onClick={addAddress} disabled={adding}>{adding ? 'Saving…' : 'Save Address'}</button>
             <button style={styles.cancelBtn} onClick={() => { setShowForm(false); setForm(EMPTY_ADDR); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Payment Methods (mock) ────────────────────────────────────────────────────
+const EMPTY_CARD = { name: '', number: '', expMonth: '', expYear: '', cvv: '' };
+
+function PaymentMethods({ apiBase }: { apiBase: string }) {
+  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(EMPTY_CARD);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetch(`${apiBase}/api/profile/payment-methods`, { credentials: 'include' })
+      .then((r) => r.json() as Promise<PaymentMethod[]>)
+      .then((m) => { setMethods(Array.isArray(m) ? m : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [apiBase]);
+
+  async function addCard() {
+    setError('');
+    setSaving(true);
+    const res = await fetch(`${apiBase}/api/profile/payment-methods`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    });
+    if (res.ok) {
+      const m = await res.json() as PaymentMethod;
+      setMethods((prev) => [...prev, m]);
+      setForm(EMPTY_CARD);
+      setShowForm(false);
+    } else {
+      const d = await res.json().catch(() => ({})) as { error?: string };
+      setError(d.error ?? 'Failed to add card');
+    }
+    setSaving(false);
+  }
+
+  async function removeCard(id: string) {
+    if (!confirm('Remove this payment method?')) return;
+    setDeleting(id);
+    const res = await fetch(`${apiBase}/api/profile/payment-methods/${id}`, { method: 'DELETE', credentials: 'include' });
+    if (res.ok) {
+      setMethods((prev) => {
+        const next = prev.filter((m) => m.id !== id);
+        if (next.length && !next.some((m) => m.isDefault)) next[0] = { ...next[0], isDefault: true };
+        return next;
+      });
+    }
+    setDeleting(null);
+  }
+
+  const set = (k: keyof typeof EMPTY_CARD, digitsOnly = false) => (v: string) =>
+    setForm((p) => ({ ...p, [k]: digitsOnly ? v.replace(/\D/g, '') : v }));
+
+  return (
+    <div>
+      <SectionHeader title="Payment Methods" subtitle="Demo only: use a test number such as 4242 4242 4242 4242. Only the brand and last 4 digits are stored." />
+      {loading && <p style={styles.loading}>Loading…</p>}
+      <div style={styles.addrList}>
+        {methods.map((m) => (
+          <div key={m.id} style={styles.addrCard}>
+            <div style={styles.addrLabel}>{m.brand}{m.isDefault ? ' (default)' : ''}</div>
+            <p style={styles.addrLine}>•••• •••• •••• {m.last4}</p>
+            <p style={styles.addrLine}>{m.name}</p>
+            <p style={styles.addrLine}>Exp {String(m.expMonth).padStart(2, '0')}/{m.expYear}</p>
+            <button style={{ ...styles.deleteBtn, marginTop: 8 }} onClick={() => removeCard(m.id)} disabled={deleting === m.id}>
+              {deleting === m.id ? '…' : 'Remove'}
+            </button>
+          </div>
+        ))}
+        {!loading && methods.length === 0 && <p style={styles.emptyState}>No saved payment methods yet.</p>}
+      </div>
+
+      {!showForm && <button style={styles.addBtn} onClick={() => setShowForm(true)}>+ Add Card</button>}
+
+      {showForm && (
+        <div style={styles.addrForm}>
+          <p style={styles.formTitle}>New Card</p>
+          <div style={styles.formGrid}>
+            <Field label="Name on card *" value={form.name} onChange={set('name')} placeholder="Jane Doe" />
+            <Field label="Card number *" value={form.number} onChange={set('number', true)} placeholder="4242424242424242" maxLength={19} />
+            <Field label="Exp month *" value={form.expMonth} onChange={set('expMonth', true)} placeholder="MM" maxLength={2} />
+            <Field label="Exp year *" value={form.expYear} onChange={set('expYear', true)} placeholder="YYYY" maxLength={4} />
+            <Field label="CVV *" value={form.cvv} onChange={set('cvv', true)} placeholder="123" maxLength={4} type="password" />
+          </div>
+          {error && <p style={{ ...styles.saveMsg, color: '#e53e3e', marginTop: 8 }}>{error}</p>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button style={styles.saveBtn} onClick={addCard} disabled={saving}>{saving ? 'Saving…' : 'Save Card'}</button>
+            <button style={styles.cancelBtn} onClick={() => { setShowForm(false); setForm(EMPTY_CARD); setError(''); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -416,7 +515,7 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle: string })
 }
 
 function Field({
-  label, value, onChange, readOnly, hint, placeholder,
+  label, value, onChange, readOnly, hint, placeholder, maxLength, type,
 }: {
   label: string;
   value: string;
@@ -424,6 +523,8 @@ function Field({
   readOnly?: boolean;
   hint?: string;
   placeholder?: string;
+  maxLength?: number;
+  type?: string;
 }) {
   return (
     <div style={styles.field}>
@@ -434,6 +535,8 @@ function Field({
         readOnly={readOnly}
         onChange={onChange ? (e) => onChange(e.target.value) : undefined}
         placeholder={placeholder}
+        maxLength={maxLength}
+        type={type}
       />
       {hint && <p style={styles.fieldHint}>{hint}</p>}
     </div>

@@ -11,6 +11,7 @@ import {
   associateTotpFactor,
   confirmTotpFactor,
 } from '../services/auth0-management';
+import { toStateAbbr } from '../utils/usStates';
 
 const router = Router();
 
@@ -89,10 +90,15 @@ router.post('/profile/addresses', requireAuth, async (req, res) => {
     res.status(400).json({ error: 'street, city, state, zip, country are required' });
     return;
   }
+  const stateAbbr = country.toUpperCase() === 'US' ? toStateAbbr(state) : state.trim();
+  if (!stateAbbr) {
+    res.status(400).json({ error: 'state must be a valid US state name or 2-letter abbreviation' });
+    return;
+  }
   try {
     const auth0User = await getUser(req.oidc!.user!.sub);
     const existing = (auth0User.user_metadata?.addresses as unknown[]) ?? [];
-    const newAddress = { id: uuidv4(), label: label ?? 'Address', street, city, state, zip, country };
+    const newAddress = { id: uuidv4(), label: label ?? 'Address', street, city, state: stateAbbr, zip, country };
     await updateUser(req.oidc!.user!.sub, {
       user_metadata: { ...(auth0User.user_metadata ?? {}), addresses: [...existing, newAddress] },
     });
@@ -115,6 +121,89 @@ router.delete('/profile/addresses/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('DELETE /profile/addresses error:', err);
     res.status(500).json({ error: 'Failed to delete address' });
+  }
+});
+
+// ----- Mock payment methods (stored in user_metadata.payment_methods) -----
+// Demo only: the full card number and CVV are never persisted. Only brand, last4,
+// expiry and cardholder name are stored.
+
+type PaymentMethod = {
+  id: string; brand: string; last4: string; expMonth: number; expYear: number;
+  name: string; isDefault: boolean;
+};
+
+function cardBrand(num: string): string {
+  if (/^4/.test(num)) return 'Visa';
+  if (/^(5[1-5]|2[2-7])/.test(num)) return 'Mastercard';
+  if (/^3[47]/.test(num)) return 'American Express';
+  if (/^(6011|65)/.test(num)) return 'Discover';
+  return 'Card';
+}
+
+router.get('/profile/payment-methods', requireAuth, async (req, res) => {
+  try {
+    const auth0User = await getUser(req.oidc!.user!.sub);
+    res.json((auth0User.user_metadata?.payment_methods as PaymentMethod[]) ?? []);
+  } catch (err) {
+    console.error('GET /profile/payment-methods error:', err);
+    res.status(500).json({ error: 'Failed to load payment methods' });
+  }
+});
+
+router.post('/profile/payment-methods', requireAuth, async (req, res) => {
+  const { name, number, expMonth, expYear, cvv } = req.body as {
+    name?: string; number?: string; expMonth?: number | string; expYear?: number | string; cvv?: string;
+  };
+  const digits = (number ?? '').replace(/[\s-]/g, '');
+  const month = Number(expMonth);
+  let year = Number(expYear);
+  if (year < 100) year += 2000;
+  if (!name?.trim() || !/^\d{13,19}$/.test(digits) || !/^\d{3,4}$/.test(cvv ?? '')) {
+    res.status(400).json({ error: 'name, a 13-19 digit card number, and a 3-4 digit cvv are required' });
+    return;
+  }
+  if (!(month >= 1 && month <= 12) || !(year >= 2000 && year <= 2100)) {
+    res.status(400).json({ error: 'Invalid expiry date' });
+    return;
+  }
+  const now = new Date();
+  if (year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth() + 1)) {
+    res.status(400).json({ error: 'Card is expired' });
+    return;
+  }
+  try {
+    const sub = req.oidc!.user!.sub;
+    const auth0User = await getUser(sub);
+    const existing = (auth0User.user_metadata?.payment_methods as PaymentMethod[]) ?? [];
+    const method: PaymentMethod = {
+      id: uuidv4(), brand: cardBrand(digits), last4: digits.slice(-4),
+      expMonth: month, expYear: year, name: name.trim(), isDefault: existing.length === 0,
+    };
+    await updateUser(sub, {
+      user_metadata: { ...(auth0User.user_metadata ?? {}), payment_methods: [...existing, method] },
+    });
+    res.status(201).json(method);
+  } catch (err) {
+    console.error('POST /profile/payment-methods error:', err);
+    res.status(500).json({ error: 'Failed to add payment method' });
+  }
+});
+
+router.delete('/profile/payment-methods/:id', requireAuth, async (req, res) => {
+  try {
+    const sub = req.oidc!.user!.sub;
+    const auth0User = await getUser(sub);
+    const existing = (auth0User.user_metadata?.payment_methods as PaymentMethod[]) ?? [];
+    const filtered = existing.filter((m) => m.id !== req.params.id);
+    if (filtered.length && !filtered.some((m) => m.isDefault)) filtered[0].isDefault = true;
+    await updateUser(sub, {
+      user_metadata: { ...(auth0User.user_metadata ?? {}), payment_methods: filtered },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /profile/payment-methods error:', err);
+    res.status(500).json({ error: 'Failed to delete payment method' });
   }
 });
 
