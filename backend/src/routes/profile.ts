@@ -15,6 +15,14 @@ import { toStateAbbr } from '../utils/usStates';
 
 const router = Router();
 
+type PaymentMethod = {
+  id: string; brand: string; last4: string; expMonth: number; expYear: number;
+  name: string; isDefault: boolean; number?: string;
+};
+
+const publicMethod = ({ number: _n, ...rest }: PaymentMethod) => rest;
+
+
 // GET /api/profile — merged Auth0 user + oidc claims
 router.get('/profile', requireAuth, async (req, res) => {
   try {
@@ -31,7 +39,12 @@ router.get('/profile', requireAuth, async (req, res) => {
       picture: user.picture,
       loyaltyId: user.loyaltyId ?? (auth0User.app_metadata?.loyaltyId as string | number) ?? null,
       loyaltyPoints: user.loyaltyPoints ?? null,
-      user_metadata: meta,
+      user_metadata: {
+        ...meta,
+        ...(Array.isArray(meta.payment_methods)
+          ? { payment_methods: (meta.payment_methods as PaymentMethod[]).map(publicMethod) }
+          : {}),
+      },
     });
   } catch (err) {
     console.error('GET /profile error:', err);
@@ -125,13 +138,11 @@ router.delete('/profile/addresses/:id', requireAuth, async (req, res) => {
 });
 
 // ----- Mock payment methods (stored in user_metadata.payment_methods) -----
-// Demo only: the full card number and CVV are never persisted. Only brand, last4,
-// expiry and cardholder name are stored.
+// DEMO ONLY (test card numbers, never real cards): the full number is stored in
+// user_metadata so a UCP client can replay it as a `card` credential. The CVV is
+// never persisted (UCP does not check it). The number is stripped from every API
+// response to the browser.
 
-type PaymentMethod = {
-  id: string; brand: string; last4: string; expMonth: number; expYear: number;
-  name: string; isDefault: boolean;
-};
 
 function cardBrand(num: string): string {
   if (/^4/.test(num)) return 'Visa';
@@ -144,7 +155,7 @@ function cardBrand(num: string): string {
 router.get('/profile/payment-methods', requireAuth, async (req, res) => {
   try {
     const auth0User = await getUser(req.oidc!.user!.sub);
-    res.json((auth0User.user_metadata?.payment_methods as PaymentMethod[]) ?? []);
+    res.json(((auth0User.user_metadata?.payment_methods as PaymentMethod[]) ?? []).map(publicMethod));
   } catch (err) {
     console.error('GET /profile/payment-methods error:', err);
     res.status(500).json({ error: 'Failed to load payment methods' });
@@ -178,12 +189,12 @@ router.post('/profile/payment-methods', requireAuth, async (req, res) => {
     const existing = (auth0User.user_metadata?.payment_methods as PaymentMethod[]) ?? [];
     const method: PaymentMethod = {
       id: uuidv4(), brand: cardBrand(digits), last4: digits.slice(-4),
-      expMonth: month, expYear: year, name: name.trim(), isDefault: existing.length === 0,
+      expMonth: month, expYear: year, name: name.trim(), isDefault: existing.length === 0, number: digits,
     };
     await updateUser(sub, {
       user_metadata: { ...(auth0User.user_metadata ?? {}), payment_methods: [...existing, method] },
     });
-    res.status(201).json(method);
+    res.status(201).json(publicMethod(method));
   } catch (err) {
     console.error('POST /profile/payment-methods error:', err);
     res.status(500).json({ error: 'Failed to add payment method' });
