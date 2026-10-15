@@ -128,7 +128,9 @@ export default function ChatInterface({ user, apiBase }: Props) {
         return;
       }
 
+      if (!res.ok) throw new Error(`chat failed: ${res.status}`);
       const data = (await res.json()) as { conversationId: string; message: Message; cibaState?: CibaState };
+      if (!data.message) throw new Error('chat response had no message');
       setConversationId(data.conversationId);
       setMessages((prev) => [...prev, data.message]);
       if (data.cibaState) setCibaState(data.cibaState);

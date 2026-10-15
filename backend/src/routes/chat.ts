@@ -4,6 +4,7 @@ import type { Tool } from '@aws-sdk/client-bedrock-runtime';
 import { requireAuth } from '../middleware/requireAuth';
 import { generateReplyWithTools, type ToolHandler } from '../services/bedrock';
 import { getLoyaltyPoints, redeemCoupon, trackLoyaltyPoints } from '../services/loyalty';
+import { getUser } from '../services/auth0-management';
 import { initiateCiba, pollCibaUntilDone } from '../services/ciba';
 import {
   getOrCreateConversation,
@@ -138,9 +139,18 @@ router.post('/chat', requireAuth, async (req, res) => {
 
   const oidcUser = req.oidc!.user!;
   const userId = oidcUser.sub;
-  const loyaltyId = oidcUser.loyaltyId as string | number | undefined;
+  let loyaltyId = oidcUser.loyaltyId as string | number | undefined;
 
   try {
+    // Same fallback as /api/loyalty: if the ID token has no loyaltyId claim, read app_metadata.
+    if (!loyaltyId) {
+      try {
+        loyaltyId = (await getUser(userId)).app_metadata?.loyaltyId as string | number | undefined;
+      } catch (err) {
+        console.warn('[chat] loyaltyId fallback failed:', (err as Error).message);
+      }
+    }
+
     const conversationId = existingId ?? uuidv4();
     const conversation = await getOrCreateConversation(conversationId, userId);
 

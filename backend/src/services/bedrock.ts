@@ -51,7 +51,8 @@ export async function generateReplyWithTools(
       new ConverseCommand({
         modelId: MODEL_ID,
         messages: bedrockMessages,
-        toolConfig: { tools },
+        // Bedrock rejects an empty tools array, so omit toolConfig when there are none.
+        ...(tools.length ? { toolConfig: { tools } } : {}),
         ...(systemPrompt ? { system: [{ text: systemPrompt }] } : {}),
         inferenceConfig: { maxTokens: 1024, temperature: 0.7 },
       })
