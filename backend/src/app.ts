@@ -9,6 +9,7 @@ import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
 import userRoutes from './routes/user';
 import profileRoutes from './routes/profile';
+import orderRoutes from './routes/orders';
 import loyaltyRoutes from './routes/loyalty';
 import purchaseRoutes from './routes/purchase';
 import anonRoutes from './routes/anon';
@@ -107,6 +108,7 @@ app.use(
 app.use('/auth', authRoutes);
 app.use('/api', userRoutes);
 app.use('/api', profileRoutes);
+app.use('/api', orderRoutes);
 app.use('/api', loyaltyRoutes);
 app.use('/api', purchaseRoutes);
 app.use('/api', chatRoutes);

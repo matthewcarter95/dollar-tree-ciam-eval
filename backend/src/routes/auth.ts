@@ -20,14 +20,19 @@ function setAnonSessionCookie(res: any, sessionToken: string) {
   });
 }
 
+// Only allow same-site relative paths (e.g. /orders/<id>) to avoid open redirects.
+function safeReturnPath(p?: string): string {
+  return p && /^\/(?!\/)[\w\-./]*$/.test(p) ? p : '';
+}
+
 router.get('/login', (req, res) => {
   const APP_HOSTNAME = process.env.APP_HOSTNAME || 'smitty.demo-connect.us';
-  const { session_token } = req.query as { session_token?: string };
+  const { session_token, return_to } = req.query as { session_token?: string; return_to?: string };
   if (session_token) {
     setAnonSessionCookie(res, session_token);
   }
   (res as any).oidc.login({
-    returnTo: `https://${APP_HOSTNAME}`,
+    returnTo: `https://${APP_HOSTNAME}${safeReturnPath(return_to)}`,
     // Pass as /authorize URL parameter too — belt-and-suspenders in case
     // the cookie is dropped during the redirect.
     ...(session_token ? { authorizationParams: { anonymous_session_token: session_token } } : {}),

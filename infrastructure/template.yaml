@@ -179,6 +179,14 @@ Resources:
         - Statement:
             - Effect: Allow
               Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:us-east-1:204352680806:table/ucp-merchant-server-orders
+                - arn:aws:dynamodb:us-east-1:204352680806:table/ucp-merchant-server-orders/index/buyer-sub-index
+        - Statement:
+            - Effect: Allow
+              Action:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
               Resource: '*'

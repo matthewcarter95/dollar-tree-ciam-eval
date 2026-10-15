@@ -52,3 +52,43 @@ export interface PaymentMethod {
   name: string;
   isDefault: boolean;
 }
+
+export interface OrderSummary {
+  id: string;
+  createdAt: string | null;
+  currency: string;
+  totalCents: number | null;
+  status: string;
+  statuses: string[];
+  items: Array<{ title: string; quantity: number; status: string }>;
+}
+
+export interface OrderTotal { type: string; amountCents: number }
+
+export interface OrderDetail extends OrderSummary {
+  buyerEmail: string | null;
+  checkoutId: string | null;
+  totals: OrderTotal[];
+  lineItems: Array<{
+    id: string;
+    itemId: string | null;
+    title: string;
+    unitPriceCents: number;
+    quantity: number;
+    fulfilled: number;
+    status: string;
+    totals: OrderTotal[];
+  }>;
+  fulfillment: {
+    expectations: Array<{
+      id?: string;
+      description?: string;
+      method_type?: string;
+      destination?: {
+        street_address?: string; address_locality?: string; address_region?: string;
+        postal_code?: string; address_country?: string;
+      };
+    }>;
+    events: Array<{ type?: string; description?: string; occurred_at?: string; [k: string]: unknown }>;
+  };
+}

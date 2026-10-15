@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import StorePage from './pages/StorePage';
 import ChatInterface from './components/ChatInterface';
 import ProfilePage from './pages/ProfilePage';
+import OrdersPage from './pages/OrdersPage';
 import CartDrawer, { CartItem } from './components/CartDrawer';
 import { useAnonSession, ANON_SUB_KEY } from './hooks/useAnonSession';
 import { colors } from './theme';
@@ -9,18 +10,55 @@ import { User } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 
-type Tab = 'shop' | 'chat' | 'profile';
+type Tab = 'shop' | 'chat' | 'profile' | 'orders';
+
+// /orders and /orders/<id> are deep-linkable (e.g. from a UCP client such as Gemini).
+function parseOrdersPath(): { isOrders: boolean; orderId: string | null } {
+  const m = window.location.pathname.match(/^\/orders(?:\/([^/]+))?\/?$/);
+  return { isOrders: !!m, orderId: m?.[1] ? decodeURIComponent(m[1]) : null };
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>('shop');
+  const [activeTab, setActiveTab] = useState<Tab>(() => (parseOrdersPath().isOrders ? 'orders' : 'shop'));
+  const [orderId, setOrderId] = useState<string | null>(() => parseOrdersPath().orderId);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [cartLoading, setCartLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { accessToken: anonToken } = useAnonSession(API_BASE);
+
+  // Keep the URL and tab in sync with browser back/forward.
+  useEffect(() => {
+    const onPop = () => {
+      const { isOrders, orderId: id } = parseOrdersPath();
+      setOrderId(id);
+      setActiveTab((t) => (isOrders ? 'orders' : t === 'orders' ? 'shop' : t));
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // Logged-out visitor on an orders link: sign in, then come straight back.
+  useEffect(() => {
+    if (authChecked && !user && parseOrdersPath().isOrders) {
+      window.location.href = `${API_BASE}/auth/login?return_to=${encodeURIComponent(window.location.pathname)}`;
+    }
+  }, [authChecked, user]);
+
+  function selectTab(tab: Tab) {
+    if (window.location.pathname !== '/') window.history.pushState(null, '', '/');
+    setOrderId(null);
+    setActiveTab(tab);
+  }
+
+  function selectOrder(id: string | null) {
+    window.history.pushState(null, '', id ? `/orders/${encodeURIComponent(id)}` : '/orders');
+    setOrderId(id);
+    setActiveTab('orders');
+  }
 
   useEffect(() => {
     checkAuth();
@@ -178,7 +216,7 @@ export default function App() {
     if (!user) {
       window.location.href = loginUrl('/auth/login');
     } else {
-      setActiveTab('chat');
+      selectTab('chat');
     }
   }
 
@@ -195,7 +233,7 @@ export default function App() {
           <nav style={styles.nav}>
             <button
               style={{ ...styles.navBtn, ...(activeTab === 'shop' ? styles.navBtnActive : {}) }}
-              onClick={() => setActiveTab('shop')}
+              onClick={() => selectTab('shop')}
             >
               🛒 Shop
             </button>
@@ -206,12 +244,20 @@ export default function App() {
               💬 AI Assistant
             </button>
             {user && (
-              <button
-                style={{ ...styles.navBtn, ...(activeTab === 'profile' ? styles.navBtnActive : {}) }}
-                onClick={() => setActiveTab('profile')}
-              >
-                👤 Profile
-              </button>
+              <>
+                <button
+                  style={{ ...styles.navBtn, ...(activeTab === 'orders' ? styles.navBtnActive : {}) }}
+                  onClick={() => selectOrder(null)}
+                >
+                  📦 Orders
+                </button>
+                <button
+                  style={{ ...styles.navBtn, ...(activeTab === 'profile' ? styles.navBtnActive : {}) }}
+                  onClick={() => selectTab('profile')}
+                >
+                  👤 Profile
+                </button>
+              </>
             )}
           </nav>
           <div style={styles.headerRight}>
@@ -248,6 +294,9 @@ export default function App() {
         )}
         {activeTab === 'chat' && user && (
           <ChatInterface user={user} apiBase={API_BASE} />
+        )}
+        {activeTab === 'orders' && user && (
+          <OrdersPage apiBase={API_BASE} orderId={orderId} onSelect={selectOrder} />
         )}
         {activeTab === 'profile' && user && (
           <ProfilePage user={user} apiBase={API_BASE} />
