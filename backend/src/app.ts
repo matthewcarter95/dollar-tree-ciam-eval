@@ -6,6 +6,7 @@ import { recordSession } from './services/dynamodb-sessions';
 import { v4 as uuidv4 } from 'uuid';
 
 import authRoutes from './routes/auth';
+import { createBrandRouter, createProviderRouter } from './pact/routes';
 import chatRoutes from './routes/chat';
 import userRoutes from './routes/user';
 import profileRoutes from './routes/profile';
@@ -27,6 +28,9 @@ app.set('trust proxy', 1);
 // all matching cross-origin responses. Adding cors() here as well causes duplicate
 // Access-Control-Allow-Origin headers which browsers reject.
 // See: CLAUDE.md — "Lambda Function URL handles CORS"
+
+// PACT Provider (/a2a, /api/platforms) needs the raw body, so it goes before the body parsers.
+app.use(createProviderRouter());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -106,6 +110,7 @@ app.use(
 );
 
 app.use('/auth', authRoutes);
+app.use(createBrandRouter()); // no-op unless PACT_ENABLED; must follow auth() for req.oidc
 app.use('/api', userRoutes);
 app.use('/api', profileRoutes);
 app.use('/api', orderRoutes);

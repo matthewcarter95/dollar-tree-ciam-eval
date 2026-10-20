@@ -24,12 +24,12 @@ type UcpOrder = {
   fulfillment?: { expectations?: unknown[]; events?: unknown[] };
   [k: string]: unknown;
 };
-type OrderRow = { id: string; buyer_sub?: string; buyer_email?: string; created_at?: string; data?: UcpOrder };
+export type OrderRow = { id: string; buyer_sub?: string; buyer_email?: string; created_at?: string; data?: UcpOrder };
 
 // The merchant server stores some numbers as strings; normalise to integers (cents).
 const num = (v: unknown): number => (v === undefined || v === null ? 0 : Number(v));
 
-function summarize(row: OrderRow) {
+export function summarize(row: OrderRow) {
   const o = row.data ?? ({ id: row.id } as UcpOrder);
   const items = o.line_items ?? [];
   const statuses = [...new Set(items.map((l) => l.status ?? 'unknown'))];
@@ -49,7 +49,7 @@ function summarize(row: OrderRow) {
   };
 }
 
-function detail(row: OrderRow) {
+export function detail(row: OrderRow) {
   const o = row.data ?? ({ id: row.id } as UcpOrder);
   return {
     ...summarize(row),
@@ -73,27 +73,38 @@ function detail(row: OrderRow) {
   };
 }
 
+// All orders for a buyer, newest first.
+export async function listOrderRows(sub: string): Promise<OrderRow[]> {
+  const rows: OrderRow[] = [];
+  let key: Record<string, unknown> | undefined;
+  do {
+    const out = await ddb.send(new QueryCommand({
+      TableName: ORDERS_TABLE,
+      IndexName: BUYER_INDEX,
+      KeyConditionExpression: 'buyer_sub = :s',
+      ExpressionAttributeValues: { ':s': sub },
+      ScanIndexForward: false,
+      ExclusiveStartKey: key,
+    }));
+    rows.push(...((out.Items ?? []) as OrderRow[]));
+    key = out.LastEvaluatedKey;
+  } while (key);
+  return rows;
+}
+
+// One order, or undefined if missing or owned by someone else (callers return 404, not 403).
+export async function getOrderRow(sub: string, id: string): Promise<OrderRow | undefined> {
+  const out = await ddb.send(new GetCommand({ TableName: ORDERS_TABLE, Key: { id } }));
+  const row = out.Item as OrderRow | undefined;
+  return row?.buyer_sub && row.buyer_sub === sub ? row : undefined;
+}
+
 const router = Router();
 
 // GET /api/orders?status=processing — the caller's orders, newest first
 router.get('/orders', requireAuth, async (req, res) => {
   try {
-    const sub = req.oidc!.user!.sub as string;
-    const rows: OrderRow[] = [];
-    let key: Record<string, unknown> | undefined;
-    do {
-      const out = await ddb.send(new QueryCommand({
-        TableName: ORDERS_TABLE,
-        IndexName: BUYER_INDEX,
-        KeyConditionExpression: 'buyer_sub = :s',
-        ExpressionAttributeValues: { ':s': sub },
-        ScanIndexForward: false,
-        ExclusiveStartKey: key,
-      }));
-      rows.push(...((out.Items ?? []) as OrderRow[]));
-      key = out.LastEvaluatedKey;
-    } while (key);
-
+    const rows = await listOrderRows(req.oidc!.user!.sub as string);
     const status = typeof req.query.status === 'string' ? req.query.status : '';
     const orders = rows.map(summarize).filter((o) => !status || o.statuses.includes(status));
     res.json(orders);
@@ -106,10 +117,8 @@ router.get('/orders', requireAuth, async (req, res) => {
 // GET /api/orders/:id — full detail; 404 (not 403) if the order belongs to someone else
 router.get('/orders/:id', requireAuth, async (req, res) => {
   try {
-    const sub = req.oidc!.user!.sub as string;
-    const out = await ddb.send(new GetCommand({ TableName: ORDERS_TABLE, Key: { id: req.params.id } }));
-    const row = out.Item as OrderRow | undefined;
-    if (!row || !row.buyer_sub || row.buyer_sub !== sub) {
+    const row = await getOrderRow(req.oidc!.user!.sub as string, req.params.id);
+    if (!row) {
       res.status(404).json({ error: 'Order not found' });
       return;
     }

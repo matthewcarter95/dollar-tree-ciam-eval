@@ -61,6 +61,25 @@ Parameters:
     NoEcho: true
     Description: Shared secret used by the Auth0 Post-Login Action to call /api/cart/merge
 
+  PactEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Turns on the PACT Provider (/a2a, /api/platforms) and Brand login (/pact/*). Off by default.
+  PactSsmPrefix:
+    Type: String
+    Default: /dollar-treasure/pact
+    AllowedPattern: "^/[A-Za-z0-9_./-]+[^/]$"
+    Description: SSM prefix; the signing key is the SecureString at <prefix>/signing-key
+  PactBrandId:
+    Type: String
+    Default: 01M3R53Q5XD7T2VYB6ZC9D0HEK
+    Description: Provider-assigned Brand id; part of the interface URL, so changing it breaks registrations
+  PactAllowedIssuers:
+    Type: String
+    Default: ''
+    Description: Comma-separated personal-agent issuers allowed to self-register. Empty allows any issuer that proves it holds its key.
+
 Globals:
   Function:
     Timeout: 120
@@ -85,6 +104,11 @@ Globals:
         DYNAMODB_CARTS_TABLE: !Ref CartsTable
         CART_MERGE_SECRET: !Ref CartMergeSecret
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
+        PACT_ENABLED: !Ref PactEnabled
+        PACT_BRAND_ID: !Ref PactBrandId
+        PACT_TABLE: !Ref PactTable
+        PACT_SIGNING_KEY_SSM_PARAMETER: !Sub '${PactSsmPrefix}/signing-key'
+        PACT_ALLOWED_ISSUERS: !Ref PactAllowedIssuers
 
 Resources:
 
@@ -158,6 +182,27 @@ Resources:
         AttributeName: ttl
         Enabled: true
 
+  # Everything the PACT Provider stores: personal agents, conversations, device codes, grants.
+  # Single table (pk, sk); TTL expires conversations, device codes and spent tokens.
+  PactTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-pact'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
   # ---- Lambda ----
   # IMPORTANT: No FunctionUrlConfig here — added post-deploy via scripts/post-deploy.sh
   # Reason: org hook AWS::EarlyValidation::PropertyValidation blocks Function URLs in CFN
@@ -176,6 +221,14 @@ Resources:
             TableName: !Ref ConversationsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CartsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PactTable
+        # Read only the PACT signing key. A SecureString under the default aws/ssm key decrypts
+        # with the caller's SSM access; no separate kms:Decrypt grant is needed.
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PactSsmPrefix}/signing-key'
         - Statement:
             - Effect: Allow
               Action:
@@ -212,3 +265,6 @@ Outputs:
 
   CartsTableName:
     Value: !Ref CartsTable
+
+  PactTableName:
+    Value: !Ref PactTable
